@@ -5,10 +5,11 @@ from datetime import datetime
 import hashlib
 from functools import wraps # Import wraps for decorator
 
+# --- Configuration ---
 TASKS_FILE = "tasks.json"
 USERS_FILE = "users.json"
 DATE_FORMAT = "%Y-%m-%d"
-SECRET_KEY = "supersecretkey123"  # Change this in production
+SECRET_KEY = "supersecretkey123" # Change this in production
 
 # --- Data Logic ---
 def load_tasks():
@@ -17,8 +18,8 @@ def load_tasks():
     try:
         with open(TASKS_FILE, "r") as f:
             return json.load(f)
-    except json.JSONDecodeError:
-        # Handle cases where the JSON file might be empty or corrupted
+    except (json.JSONDecodeError, FileNotFoundError):
+        # Handle cases where the JSON file might be empty, corrupted, or not found
         return []
 
 def save_tasks(tasks):
@@ -28,7 +29,8 @@ def save_tasks(tasks):
 def generate_task_id(tasks):
     if not tasks:
         return 1
-    return max(task.get('id', 0) for task in tasks) + 1 # Use .get() for safety
+    # Use .get() for safety in case 'id' key is missing in some old entries
+    return max(task.get('id', 0) for task in tasks) + 1
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -39,8 +41,8 @@ def load_users():
     try:
         with open(USERS_FILE, "r") as f:
             return json.load(f)
-    except json.JSONDecodeError:
-        # Handle cases where the JSON file might be empty or corrupted
+    except (json.JSONDecodeError, FileNotFoundError):
+        # Handle cases where the JSON file might be empty, corrupted, or not found
         return []
 
 def save_users(users):
@@ -50,7 +52,7 @@ def save_users(users):
 def find_user(username):
     users = load_users()
     for user in users:
-        if user["username"] == username:
+        if user.get("username") == username: # Use .get() for safer access
             return user
     return None
 
@@ -61,7 +63,7 @@ def add_task(title, due, priority, category, note, username):
         "title": title,
         "due": due,
         "priority": priority,
-        "category": category or "General",
+        "category": category or "General", # Default to General if empty
         "note": note or "",
         "done": False,
         "created": datetime.now().strftime(DATE_FORMAT),
@@ -93,6 +95,7 @@ def mark_done(task_id, username):
 
 def delete_task(task_id, username):
     tasks = load_tasks()
+    # Filter out the task with matching ID and username
     tasks = [t for t in tasks if not (t.get("id") == task_id and t.get("username") == username)]
     save_tasks(tasks)
 
@@ -113,11 +116,11 @@ def unarchive_task(task_id, username):
     save_tasks(tasks)
 
 
-# --- Flask Web App ---
-app = Flask(__name__) # Fixed: __name__
+# --- Flask Web App Initialization ---
+app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
-# Decorator for login required
+# --- Decorator for login required ---
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -450,7 +453,6 @@ def index():
     # Initialize edit_task as None for the main view
     return render_template_string(MAIN_HTML, tasks=user_tasks, q=q, edit_task=None, session=session)
 
-
 @app.route("/add", methods=["POST"])
 @login_required
 def add():
@@ -458,20 +460,17 @@ def add():
     title = request.form.get("title", "").strip()
     due = request.form.get("due", "").strip()
     priority = request.form.get("priority", "medium")
-    category = request.form.get("category", "General")
-    note = request.form.get("note", "")
+    category = request.form.get("category", "").strip() # Ensure category is stripped
+    note = request.form.get("note", "").strip() # Ensure note is stripped
     username = session['username']
 
-    # Validate due date format if provided
+    # Validate due date format if provided, otherwise set default
     if due:
         try:
             datetime.strptime(due, DATE_FORMAT)
         except ValueError:
             flash(f"Invalid due date format. Please use {DATE_FORMAT}.", 'error')
-            # Redirect back to index with pre-filled form values for correction
-            # This is a bit complex without redirecting to a separate edit page
-            # For simplicity, I'll clear it or leave as is. User needs to re-enter.
-            due = "No due date" # Reset to default if invalid
+            return redirect(url_for("index")) # Redirect back to index if date is invalid
     else:
         due = "No due date" # Default for empty due date
 
@@ -479,8 +478,12 @@ def add():
         flash("Task title cannot be empty.", 'error')
     else:
         if edit_id:
-            update_task(int(edit_id), title, due, priority, category, note, username)
-            flash("Task updated successfully!", 'success')
+            try:
+                task_id = int(edit_id)
+                update_task(task_id, title, due, priority, category, note, username)
+                flash("Task updated successfully!", 'success')
+            except ValueError:
+                flash("Invalid task ID for update.", 'error')
         else:
             add_task(title, due, priority, category, note, username)
             flash("Task added successfully!", 'success')
@@ -495,7 +498,7 @@ def edit(task_id):
     user_tasks = [t for t in all_tasks if t.get('username') == username]
     
     # Find the task to edit
-    edit_task = next((t for t in user_tasks if t["id"] == task_id), None)
+    edit_task = next((t for t in user_tasks if t.get("id") == task_id), None)
 
     if not edit_task:
         flash("Task not found or you don't have permission to edit it.", 'error')
@@ -519,7 +522,6 @@ def edit(task_id):
         ]
 
     return render_template_string(MAIN_HTML, tasks=tasks_for_display, q=q, edit_task=edit_task, session=session)
-
 
 @app.route("/mark_done/<int:task_id>", methods=["POST"])
 @login_required
@@ -605,5 +607,5 @@ def logout():
     flash("You have been logged out.", 'success')
     return redirect(url_for('login'))
 
-if __name__ == "__main__": # Fixed: __name__
+if __name__ == "__main__":
     app.run(debug=True)
