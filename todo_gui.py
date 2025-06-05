@@ -83,27 +83,17 @@ def unarchive_task(task_id):
 
 # --- GUI ---
 class TodoApp:
-    def __init__(self, root):
+    def _init_(self, root):
         self.root = root
         self.root.title("To-Do List GUI")
         self.create_widgets()
         self.refresh_tasks()
 
     def create_widgets(self):
-        # Search bar
-        search_frame = ttk.Frame(self.root)
-        search_frame.pack(fill="x", padx=10, pady=5)
-        ttk.Label(search_frame, text="Search:").pack(side="left")
-        self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
-        search_entry.pack(side="left", padx=5)
-        search_entry.bind("<KeyRelease>", lambda e: self.refresh_tasks())
-
-        # Entry frame
         entry_frame = ttk.LabelFrame(self.root, text="Add/Edit Task")
         entry_frame.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(entry_frame, text="Title: ").grid(row=0, column=0, sticky="e")
+        ttk.Label(entry_frame, text="Title:").grid(row=0, column=0, sticky="e")
         self.title_var = tk.StringVar()
         ttk.Entry(entry_frame, textvariable=self.title_var, width=30).grid(row=0, column=1, padx=2)
 
@@ -111,15 +101,15 @@ class TodoApp:
         self.due_var = tk.StringVar()
         ttk.Entry(entry_frame, textvariable=self.due_var, width=15).grid(row=0, column=3, padx=2)
 
-        ttk.Label(entry_frame, text="Priority: ").grid(row=1, column=0, sticky="e")
+        ttk.Label(entry_frame, text="Priority:").grid(row=1, column=0, sticky="e")
         self.priority_var = tk.StringVar(value="medium")
         ttk.Combobox(entry_frame, textvariable=self.priority_var, values=["low", "medium", "high"], width=12).grid(row=1, column=1, padx=2)
 
-        ttk.Label(entry_frame, text="Category: ").grid(row=1, column=2, sticky="e")
+        ttk.Label(entry_frame, text="Category:").grid(row=1, column=2, sticky="e")
         self.category_var = tk.StringVar(value="General")
         ttk.Entry(entry_frame, textvariable=self.category_var, width=15).grid(row=1, column=3, padx=2)
 
-        ttk.Label(entry_frame, text="Note: ").grid(row=2, column=0, sticky="e")
+        ttk.Label(entry_frame, text="Note:").grid(row=2, column=0, sticky="e")
         self.note_var = tk.StringVar()
         ttk.Entry(entry_frame, textvariable=self.note_var, width=50).grid(row=2, column=1, columnspan=3, padx=2, pady=2, sticky="ew")
 
@@ -131,7 +121,7 @@ class TodoApp:
         self.tree = ttk.Treeview(self.root, columns=("id", "title", "due", "priority", "category", "done", "archived"), show="headings")
         for col in ("id", "title", "due", "priority", "category", "done", "archived"):
             self.tree.heading(col, text=col.capitalize())
-            self.tree.column(col, width=100)
+            self.tree.column(col, width=80 if col=="title" else 60)
         self.tree.pack(fill="both", expand=True, padx=10, pady=5)
         self.tree.bind("<Double-1>", self.on_tree_select)
 
@@ -141,6 +131,7 @@ class TodoApp:
         ttk.Button(btn_frame, text="Delete", command=self.delete_task).pack(side="left")
         ttk.Button(btn_frame, text="Archive", command=self.archive_task).pack(side="left")
         ttk.Button(btn_frame, text="Unarchive", command=self.unarchive_task).pack(side="left")
+        ttk.Button(btn_frame, text="Export to CSV", command=self.export_to_csv).pack(side="left")
         ttk.Button(btn_frame, text="Refresh", command=self.refresh_tasks).pack(side="right")
 
     def add_task(self):
@@ -203,17 +194,25 @@ class TodoApp:
         unarchive_task(task_id)
         self.refresh_tasks()
 
+    def export_to_csv(self):
+        tasks = load_tasks()
+        if not tasks:
+            messagebox.showinfo("Export", "No tasks to export.")
+            return
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")], title="Save tasks as CSV")
+        if not file_path:
+            return
+        with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=["id", "title", "due", "priority", "category", "note", "done", "created", "archived"])
+            writer.writeheader()
+            for task in tasks:
+                writer.writerow(task)
+        messagebox.showinfo("Export", f"Tasks exported to {file_path}")
+
     def refresh_tasks(self):
-        search_term = self.search_var.get().strip().lower() if hasattr(self, "search_var") else ""
         for row in self.tree.get_children():
             self.tree.delete(row)
         for task in load_tasks():
-            if search_term and not (
-                search_term in task["title"].lower() or
-                search_term in task.get("category", "").lower() or
-                search_term in task.get("note", "").lower()
-            ):
-                continue
             self.tree.insert("", "end", values=(task["id"], task["title"], task["due"], task["priority"], task["category"], "Yes" if task["done"] else "No", "Yes" if task.get("archived", False) else "No"))
 
     def on_tree_select(self, event):
@@ -245,7 +244,7 @@ class TodoApp:
         if hasattr(self, "selected_id"):
             del self.selected_id
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     root = tk.Tk()
     app = TodoApp(root)
     root.mainloop()
