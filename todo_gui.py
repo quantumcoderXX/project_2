@@ -12,8 +12,12 @@ DATE_FORMAT = "%Y-%m-%d"
 def load_tasks():
     if not os.path.exists(TASKS_FILE):
         return []
-    with open(TASKS_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(TASKS_FILE, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        messagebox.showerror("Error", "Could not read tasks.json. File might be corrupted.")
+        return []
 
 def save_tasks(tasks):
     with open(TASKS_FILE, "w") as f:
@@ -83,7 +87,7 @@ def unarchive_task(task_id):
 
 # --- GUI ---
 class TodoApp:
-    def _init_(self, root):
+    def __init__(self, root):
         self.root = root
         self.root.title("To-Do List GUI")
         self.create_widgets()
@@ -118,10 +122,22 @@ class TodoApp:
         self.update_btn = ttk.Button(entry_frame, text="Update Task", command=self.update_task, state="disabled")
         self.update_btn.grid(row=3, column=2, pady=4)
 
+        # Filter frame
+        filter_frame = ttk.LabelFrame(self.root, text="Filter Tasks")
+        filter_frame.pack(fill="x", padx=10, pady=5)
+
+        ttk.Label(filter_frame, text="Filter by Category:").pack(side="left", padx=5)
+        self.filter_category_var = tk.StringVar(value="All Categories")
+        self.category_filter_combobox = ttk.Combobox(filter_frame, textvariable=self.filter_category_var, width=20, state="readonly")
+        self.category_filter_combobox.pack(side="left", padx=5)
+        self.category_filter_combobox.bind("<<ComboboxSelected>>", self.refresh_tasks)
+        self.populate_category_filter()
+
         self.tree = ttk.Treeview(self.root, columns=("id", "title", "due", "priority", "category", "done", "archived"), show="headings")
         for col in ("id", "title", "due", "priority", "category", "done", "archived"):
             self.tree.heading(col, text=col.capitalize())
-            self.tree.column(col, width=80 if col=="title" else 60)
+            self.tree.column(col, width=80 if col=="title" else 60, anchor="center")
+        self.tree.column("title", width=150, anchor="w")
         self.tree.pack(fill="both", expand=True, padx=10, pady=5)
         self.tree.bind("<Double-1>", self.on_tree_select)
 
@@ -131,32 +147,62 @@ class TodoApp:
         ttk.Button(btn_frame, text="Delete", command=self.delete_task).pack(side="left")
         ttk.Button(btn_frame, text="Archive", command=self.archive_task).pack(side="left")
         ttk.Button(btn_frame, text="Unarchive", command=self.unarchive_task).pack(side="left")
-        ttk.Button(btn_frame, text="Export to CSV", command=self.export_to_csv).pack(side="left")
+        ttk.Button(btn_frame, text="Export to CSV", command=self.export_to_csv).pack(side="left", padx=(15, 0))
         ttk.Button(btn_frame, text="Refresh", command=self.refresh_tasks).pack(side="right")
+
+    def populate_category_filter(self):
+        tasks = load_tasks()
+        categories = sorted(list(set(task["category"] for task in tasks if "category" in task)))
+        self.category_filter_combobox["values"] = ["All Categories"] + categories
 
     def add_task(self):
         title = self.title_var.get().strip()
-        due = self.due_var.get().strip() or "No due date"
-        priority = self.priority_var.get().strip() or "medium"
-        category = self.category_var.get().strip() or "General"
+        due = self.due_var.get().strip()
+        priority = self.priority_var.get().strip()
+        category = self.category_var.get().strip()
         note = self.note_var.get().strip()
+
         if not title:
             messagebox.showerror("Error", "Title is required.")
             return
+
+        if due and due != "No due date":
+            try:
+                datetime.strptime(due, DATE_FORMAT)
+            except ValueError:
+                messagebox.showerror("Invalid Date", f"Due date must be in {DATE_FORMAT} format. Leaving blank will set 'No due date'.")
+                return
+
         add_task(title, due, priority, category, note)
         self.clear_entry()
+        self.populate_category_filter()
         self.refresh_tasks()
 
     def update_task(self):
         if not hasattr(self, "selected_id"):
+            messagebox.showwarning("No Selection", "Please select a task to update.")
             return
+
         title = self.title_var.get().strip()
-        due = self.due_var.get().strip() or "No due date"
-        priority = self.priority_var.get().strip() or "medium"
-        category = self.category_var.get().strip() or "General"
+        due = self.due_var.get().strip()
+        priority = self.priority_var.get().strip()
+        category = self.category_var.get().strip()
         note = self.note_var.get().strip()
+
+        if not title:
+            messagebox.showerror("Error", "Title is required.")
+            return
+
+        if due and due != "No due date":
+            try:
+                datetime.strptime(due, DATE_FORMAT)
+            except ValueError:
+                messagebox.showerror("Invalid Date", f"Due date must be in {DATE_FORMAT} format. Leaving blank will set 'No due date'.")
+                return
+
         update_task(self.selected_id, title, due, priority, category, note)
         self.clear_entry()
+        self.populate_category_filter()
         self.refresh_tasks()
         self.add_btn["state"] = "normal"
         self.update_btn["state"] = "disabled"
@@ -164,6 +210,7 @@ class TodoApp:
     def mark_done(self):
         sel = self.tree.selection()
         if not sel:
+            messagebox.showwarning("No Selection", "Please select a task to mark as done.")
             return
         task_id = int(self.tree.item(sel[0])["values"][0])
         mark_done(task_id)
@@ -172,15 +219,19 @@ class TodoApp:
     def delete_task(self):
         sel = self.tree.selection()
         if not sel:
+            messagebox.showwarning("No Selection", "Please select a task to delete.")
             return
         task_id = int(self.tree.item(sel[0])["values"][0])
-        if messagebox.askyesno("Delete", "Delete this task?"):
+        if messagebox.askyesno("Delete", "Are you sure you want to delete this task permanently?"):
             delete_task(task_id)
+            self.populate_category_filter()
             self.refresh_tasks()
+            self.clear_entry()
 
     def archive_task(self):
         sel = self.tree.selection()
         if not sel:
+            messagebox.showwarning("No Selection", "Please select a task to archive.")
             return
         task_id = int(self.tree.item(sel[0])["values"][0])
         archive_task(task_id)
@@ -189,6 +240,7 @@ class TodoApp:
     def unarchive_task(self):
         sel = self.tree.selection()
         if not sel:
+            messagebox.showwarning("No Selection", "Please select a task to unarchive.")
             return
         task_id = int(self.tree.item(sel[0])["values"][0])
         unarchive_task(task_id)
@@ -199,21 +251,48 @@ class TodoApp:
         if not tasks:
             messagebox.showinfo("Export", "No tasks to export.")
             return
-        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")], title="Save tasks as CSV")
+
+        default_filename = f"tasks_{datetime.now().strftime('%Y%m%d')}.csv"
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile=default_filename,
+            title="Save tasks as CSV"
+        )
         if not file_path:
             return
-        with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=["id", "title", "due", "priority", "category", "note", "done", "created", "archived"])
-            writer.writeheader()
-            for task in tasks:
-                writer.writerow(task)
-        messagebox.showinfo("Export", f"Tasks exported to {file_path}")
 
-    def refresh_tasks(self):
+        try:
+            fieldnames = ["id", "title", "due", "priority", "category", "note", "done", "created", "archived"]
+            with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                for task in tasks:
+                    row = {field: task.get(field, "") for field in fieldnames}
+                    writer.writerow(row)
+            messagebox.showinfo("Export Success", f"Tasks exported to:\n{file_path}")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export tasks: {e}")
+
+    def refresh_tasks(self, event=None):
         for row in self.tree.get_children():
             self.tree.delete(row)
-        for task in load_tasks():
-            self.tree.insert("", "end", values=(task["id"], task["title"], task["due"], task["priority"], task["category"], "Yes" if task["done"] else "No", "Yes" if task.get("archived", False) else "No"))
+
+        selected_category = self.filter_category_var.get()
+        all_tasks = load_tasks()
+
+        filtered_tasks = [task for task in all_tasks if selected_category == "All Categories" or task.get("category") == selected_category]
+
+        for task in filtered_tasks:
+            self.tree.insert("", "end", values=(
+                task["id"],
+                task["title"],
+                task["due"],
+                task["priority"],
+                task["category"],
+                "Yes" if task["done"] else "No",
+                "Yes" if task.get("archived", False) else "No"
+            ))
 
     def on_tree_select(self, event):
         sel = self.tree.selection()
@@ -244,7 +323,7 @@ class TodoApp:
         if hasattr(self, "selected_id"):
             del self.selected_id
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     root = tk.Tk()
     app = TodoApp(root)
     root.mainloop()

@@ -2,41 +2,25 @@ from flask import Flask, render_template_string, request, redirect, url_for, ses
 import json
 import os
 from datetime import datetime
-
 import hashlib
+from functools import wraps # Import wraps for decorator
 
-
+# --- Configuration ---
 TASKS_FILE = "tasks.json"
 USERS_FILE = "users.json"
 DATE_FORMAT = "%Y-%m-%d"
-SECRET_KEY = "supersecretkey123"  # Change this in production
+SECRET_KEY = "supersecretkey123" # Change this in production
 
-# --- Data Logic (reuse from CLI) ---
+# --- Data Logic ---
 def load_tasks():
     if not os.path.exists(TASKS_FILE):
         return []
-    with open(TASKS_FILE, "r") as f:
-        return json.load(f)
-# --- Data Logic (reuse from CLI) ---
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def load_users():
-    if not os.path.exists(USERS_FILE):
+    try:
+        with open(TASKS_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        # Handle cases where the JSON file might be empty, corrupted, or not found
         return []
-    with open(USERS_FILE, "r") as f:
-        return json.load(f)
-
-def save_users(users):
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=4)
-
-def find_user(username):
-    users = load_users()
-    for user in users:
-        if user["username"] == username:
-            return user
-    return None
 
 def save_tasks(tasks):
     with open(TASKS_FILE, "w") as f:
@@ -45,7 +29,32 @@ def save_tasks(tasks):
 def generate_task_id(tasks):
     if not tasks:
         return 1
-    return max(task['id'] for task in tasks) + 1
+    # Use .get() for safety in case 'id' key is missing in some old entries
+    return max(task.get('id', 0) for task in tasks) + 1
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        return []
+    try:
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        # Handle cases where the JSON file might be empty, corrupted, or not found
+        return []
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, indent=4)
+
+def find_user(username):
+    users = load_users()
+    for user in users:
+        if user.get("username") == username: # Use .get() for safer access
+            return user
+    return None
 
 def add_task(title, due, priority, category, note, username):
     tasks = load_tasks()
@@ -54,7 +63,7 @@ def add_task(title, due, priority, category, note, username):
         "title": title,
         "due": due,
         "priority": priority,
-        "category": category or "General",
+        "category": category or "General", # Default to General if empty
         "note": note or "",
         "done": False,
         "created": datetime.now().strftime(DATE_FORMAT),
@@ -67,7 +76,7 @@ def add_task(title, due, priority, category, note, username):
 def update_task(task_id, title, due, priority, category, note, username):
     tasks = load_tasks()
     for task in tasks:
-        if task["id"] == task_id and task["username"] == username:
+        if task.get("id") == task_id and task.get("username") == username:
             task["title"] = title
             task["due"] = due
             task["priority"] = priority
@@ -79,20 +88,21 @@ def update_task(task_id, title, due, priority, category, note, username):
 def mark_done(task_id, username):
     tasks = load_tasks()
     for task in tasks:
-        if task["id"] == task_id and task["username"] == username:
+        if task.get("id") == task_id and task.get("username") == username:
             task["done"] = True
             break
     save_tasks(tasks)
 
 def delete_task(task_id, username):
     tasks = load_tasks()
-    tasks = [t for t in tasks if not (t["id"] == task_id and t["username"] == username)]
+    # Filter out the task with matching ID and username
+    tasks = [t for t in tasks if not (t.get("id") == task_id and t.get("username") == username)]
     save_tasks(tasks)
 
 def archive_task(task_id, username):
     tasks = load_tasks()
     for task in tasks:
-        if task["id"] == task_id and task["username"] == username:
+        if task.get("id") == task_id and task.get("username") == username:
             task["archived"] = True
             break
     save_tasks(tasks)
@@ -100,16 +110,27 @@ def archive_task(task_id, username):
 def unarchive_task(task_id, username):
     tasks = load_tasks()
     for task in tasks:
-        if task["id"] == task_id and task["username"] == username:
+        if task.get("id") == task_id and task.get("username") == username:
             task["archived"] = False
             break
     save_tasks(tasks)
 
 
-# --- Flask Web App ---
-app = Flask(_name_)
+# --- Flask Web App Initialization ---
+app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
+# --- Decorator for login required ---
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            flash('Please log in to access this page.', 'error')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# --- HTML Templates ---
 LOGIN_HTML = """
 <!DOCTYPE html>
 <html>
@@ -117,8 +138,8 @@ LOGIN_HTML = """
     <title>Login - To-Do List</title>
     <link href='https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap' rel='stylesheet'>
     <style>
-        body { font-family: 'Roboto', Arial, sans-serif; background: linear-gradient(120deg, #f6d365 0%, #fda085 100%); min-height: 100vh; margin: 0; }
-        .login-container { max-width: 400px; margin: 80px auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); padding: 32px 40px 24px 40px; }
+        body { font-family: 'Roboto', Arial, sans-serif; background: linear-gradient(120deg, #f6d365 0%, #fda085 100%); min-height: 100vh; margin: 0; display: flex; align-items: center; justify-content: center;}
+        .login-container { max-width: 400px; width: 90%; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); padding: 32px 40px 24px 40px; }
         h2 { text-align: center; color: #f76b1c; margin-bottom: 32px; font-weight: 700; letter-spacing: 2px; }
         form { display: flex; flex-direction: column; gap: 16px; }
         input { padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; outline: none; transition: border 0.2s; }
@@ -127,15 +148,21 @@ LOGIN_HTML = """
         button:hover { background: linear-gradient(90deg, #fad961 0%, #f76b1c 100%); }
         .switch-link { text-align: center; margin-top: 10px; }
         .switch-link a { color: #f76b1c; text-decoration: underline; font-size: 0.98rem; }
-        .error { color: #d32f2f; text-align: center; margin-bottom: 10px; }
-        .success { color: #388e3c; text-align: center; margin-bottom: 10px; }
+        .flash { padding: 10px; margin-bottom: 10px; border-radius: 5px; text-align: center; }
+        .flash.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .flash.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     </style>
 </head>
 <body>
     <div class="login-container">
         <h2>Login</h2>
-        {% if error %}<div class="error">{{ error }}</div>{% endif %}
-        {% if success %}<div class="success">{{ success }}</div>{% endif %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
         <form method="post">
             <input name="username" placeholder="Username" required autofocus>
             <input name="password" type="password" placeholder="Password" required>
@@ -154,8 +181,8 @@ REGISTER_HTML = """
     <title>Register - To-Do List</title>
     <link href='https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap' rel='stylesheet'>
     <style>
-        body { font-family: 'Roboto', Arial, sans-serif; background: linear-gradient(120deg, #f6d365 0%, #fda085 100%); min-height: 100vh; margin: 0; }
-        .login-container { max-width: 400px; margin: 80px auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); padding: 32px 40px 24px 40px; }
+        body { font-family: 'Roboto', Arial, sans-serif; background: linear-gradient(120deg, #f6d365 0%, #fda085 100%); min-height: 100vh; margin: 0; display: flex; align-items: center; justify-content: center;}
+        .login-container { max-width: 400px; width: 90%; margin: 80px auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); padding: 32px 40px 24px 40px; }
         h2 { text-align: center; color: #f76b1c; margin-bottom: 32px; font-weight: 700; letter-spacing: 2px; }
         form { display: flex; flex-direction: column; gap: 16px; }
         input { padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; outline: none; transition: border 0.2s; }
@@ -164,15 +191,21 @@ REGISTER_HTML = """
         button:hover { background: linear-gradient(90deg, #fad961 0%, #f76b1c 100%); }
         .switch-link { text-align: center; margin-top: 10px; }
         .switch-link a { color: #f76b1c; text-decoration: underline; font-size: 0.98rem; }
-        .error { color: #d32f2f; text-align: center; margin-bottom: 10px; }
-        .success { color: #388e3c; text-align: center; margin-bottom: 10px; }
+        .flash { padding: 10px; margin-bottom: 10px; border-radius: 5px; text-align: center; }
+        .flash.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .flash.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     </style>
 </head>
 <body>
     <div class="login-container">
         <h2>Register</h2>
-        {% if error %}<div class="error">{{ error }}</div>{% endif %}
-        {% if success %}<div class="success">{{ success }}</div>{% endif %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
         <form method="post">
             <input name="username" placeholder="Username" required autofocus>
             <input name="password" type="password" placeholder="Password" required>
@@ -185,7 +218,8 @@ REGISTER_HTML = """
 </html>
 """
 
-HTML = """
+# Main task list HTML (Combined and cleaned up)
+MAIN_HTML = """
 <!DOCTYPE html>
 <html>
 <head>
@@ -292,6 +326,17 @@ HTML = """
         .actions button:hover {
             background: #f6d36533;
         }
+        .task-title-link {
+            text-decoration: none;
+            color: inherit;
+        }
+        .task-title-link:hover {
+            text-decoration: underline;
+        }
+        .flash { padding: 10px; margin-bottom: 10px; border-radius: 5px; text-align: center; }
+        .flash.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .flash.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+
         @media (max-width: 700px) {
             .container { padding: 10px; }
             .add-form { flex-direction: column; align-items: stretch; }
@@ -308,9 +353,18 @@ HTML = """
             <a href="{{ url_for('logout') }}" style="margin-left:18px;color:#f76b1c;text-decoration:underline;font-size:0.98rem;">Logout</a>
         </div>
     </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category, message in messages %}
+    <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
     <form class="add-form" method="post" action="{{ url_for('add') }}">
         <input name="title" placeholder="Title" required value="{{ edit_task.title if edit_task else '' }}">
-        <input name="due" placeholder="Due (YYYY-MM-DD)" value="{{ edit_task.due if edit_task else '' }}">
+        <input name="due" type="date" placeholder="Due (YYYY-MM-DD)" value="{{ edit_task.due if edit_task and edit_task.due != 'No due date' else '' }}">
         <select name="priority">
             <option value="low" {% if edit_task and edit_task.priority=='low' %}selected{% endif %}>Low</option>
             <option value="medium" {% if not edit_task or edit_task.priority=='medium' %}selected{% endif %}>Medium</option>
@@ -326,11 +380,13 @@ HTML = """
         <button type="submit"><i class="fa-solid fa-plus"></i> Add Task</button>
         {% endif %}
     </form>
+
     <form method="get" style="margin-bottom:18px;display:flex;gap:10px;justify-content:center;">
         <input name="q" placeholder="Search by title, category, or note" value="{{ q|default('') }}" style="padding:7px 12px;border-radius:6px;border:1px solid #ddd;width:260px;">
         <button type="submit" style="background:#f76b1c;color:#fff;border:none;border-radius:6px;padding:7px 18px;font-weight:600;cursor:pointer;"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
         {% if q %}<a href="{{ url_for('index') }}" style="align-self:center;color:#f76b1c;text-decoration:underline;font-size:0.95rem;">Clear</a>{% endif %}
     </form>
+
     <table>
         <tr>
             <th>Title</th><th>Due</th><th>Priority</th><th>Category</th><th>Note</th><th>Created</th>
@@ -338,7 +394,7 @@ HTML = """
         </tr>
         {% for task in tasks %}
         <tr class="{% if task.done %}done{% endif %} {% if task.archived %}archived{% endif %}">
-            <td>{{ task.title }}</td>
+            <td><a href="{{ url_for('edit', task_id=task.id) }}" class="task-title-link">{{ task.title }}</a></td>
             <td>{{ task.due }}</td>
             <td>{{ task.priority }}</td>
             <td>{{ task.category }}</td>
@@ -347,15 +403,15 @@ HTML = """
             <td>{{ "Yes" if task.done else "No" }}</td>
             <td>{{ "Yes" if task.archived else "No" }}</td>
             <td class="actions">
-                <form method="get" action="{{ url_for('edit', task_id=task.id) }}"><button title="Edit"><i class="fa-solid fa-pen"></i></button></form>
+                <form method="get" action="{{ url_for('edit', task_id=task.id) }}"><button type="submit" title="Edit"><i class="fa-solid fa-pen"></i></button></form>
                 {% if not task.done %}
-                <form method="post" action="{{ url_for('mark_done_route', task_id=task.id) }}"><button title="Mark as Done"><i class="fa-solid fa-check"></i></button></form>
+                <form method="post" action="{{ url_for('mark_done_route', task_id=task.id) }}"><button type="submit" title="Mark as Done"><i class="fa-solid fa-check"></i></button></form>
                 {% endif %}
-                <form method="post" action="{{ url_for('delete', task_id=task.id) }}"><button title="Delete"><i class="fa-solid fa-trash"></i></button></form>
+                <form method="post" action="{{ url_for('delete', task_id=task.id) }}"><button type="submit" title="Delete"><i class="fa-solid fa-trash"></i></button></form>
                 {% if not task.archived %}
-                <form method="post" action="{{ url_for('archive', task_id=task.id) }}"><button title="Archive"><i class="fa-solid fa-box-archive"></i></button></form>
+                <form method="post" action="{{ url_for('archive', task_id=task.id) }}"><button type="submit" title="Archive"><i class="fa-solid fa-box-archive"></i></button></form>
                 {% else %}
-                <form method="post" action="{{ url_for('unarchive', task_id=task.id) }}"><button title="Unarchive"><i class="fa-solid fa-box-open"></i></button></form>
+                <form method="post" action="{{ url_for('unarchive', task_id=task.id) }}"><button type="submit" title="Unarchive"><i class="fa-solid fa-box-open"></i></button></form>
                 {% endif %}
             </td>
         </tr>
@@ -366,71 +422,113 @@ HTML = """
 </html>
 """
 
-
-def login_required(f):
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'username' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated
-
+# --- Flask Routes ---
 @app.route("/", methods=["GET"])
 @login_required
 def index():
     q = request.args.get("q", "").strip().lower()
     username = session['username']
-    tasks = [t for t in load_tasks() if t.get('username') == username]
+    
+    all_tasks = load_tasks()
+    user_tasks = [t for t in all_tasks if t.get('username') == username]
+
+    # Sort tasks by due date
     def parse_due(task):
         try:
-            return datetime.strptime(task["due"], "%Y-%m-%d")
-        except Exception:
-            return datetime.max
-    tasks = sorted(tasks, key=parse_due)
+            return datetime.strptime(task["due"], DATE_FORMAT)
+        except ValueError:
+            return datetime.max # Tasks with invalid/no due date go to the end
+
+    user_tasks = sorted(user_tasks, key=parse_due)
+
+    # Apply search filter
     if q:
-        tasks = [t for t in tasks if q in t["title"].lower() or q in t.get("category", "").lower() or q in t.get("note", "").lower()]
-    return render_template_string(HTML, tasks=tasks, q=q, edit_task=None, session=session)
+        user_tasks = [
+            t for t in user_tasks
+            if q in t["title"].lower() or
+               q in t.get("category", "").lower() or
+               q in t.get("note", "").lower()
+        ]
+    
+    # Initialize edit_task as None for the main view
+    return render_template_string(MAIN_HTML, tasks=user_tasks, q=q, edit_task=None, session=session)
 
 @app.route("/add", methods=["POST"])
 @login_required
 def add():
     edit_id = request.form.get("edit_id")
     title = request.form.get("title", "").strip()
-    due = request.form.get("due", "").strip() or "No due date"
+    due = request.form.get("due", "").strip()
     priority = request.form.get("priority", "medium")
-    category = request.form.get("category", "General")
-    note = request.form.get("note", "")
+    category = request.form.get("category", "").strip() # Ensure category is stripped
+    note = request.form.get("note", "").strip() # Ensure note is stripped
     username = session['username']
-    if title:
+
+    # Validate due date format if provided, otherwise set default
+    if due:
+        try:
+            datetime.strptime(due, DATE_FORMAT)
+        except ValueError:
+            flash(f"Invalid due date format. Please use {DATE_FORMAT}.", 'error')
+            return redirect(url_for("index")) # Redirect back to index if date is invalid
+    else:
+        due = "No due date" # Default for empty due date
+
+    if not title:
+        flash("Task title cannot be empty.", 'error')
+    else:
         if edit_id:
-            update_task(int(edit_id), title, due, priority, category, note, username)
+            try:
+                task_id = int(edit_id)
+                update_task(task_id, title, due, priority, category, note, username)
+                flash("Task updated successfully!", 'success')
+            except ValueError:
+                flash("Invalid task ID for update.", 'error')
         else:
             add_task(title, due, priority, category, note, username)
+            flash("Task added successfully!", 'success')
+            
     return redirect(url_for("index"))
 
 @app.route("/edit/<int:task_id>", methods=["GET"])
 @login_required
 def edit(task_id):
-    q = request.args.get("q", "")
     username = session['username']
-    tasks = [t for t in load_tasks() if t.get('username') == username]
-    edit_task = next((t for t in tasks if t["id"] == task_id), None)
+    all_tasks = load_tasks()
+    user_tasks = [t for t in all_tasks if t.get('username') == username]
+    
+    # Find the task to edit
+    edit_task = next((t for t in user_tasks if t.get("id") == task_id), None)
+
+    if not edit_task:
+        flash("Task not found or you don't have permission to edit it.", 'error')
+        return redirect(url_for('index'))
+
+    # Sort and filter tasks for display on the main page (same logic as index)
+    q = request.args.get("q", "").strip().lower()
     def parse_due(task):
         try:
-            return datetime.strptime(task["due"], "%Y-%m-%d")
-        except Exception:
+            return datetime.strptime(task["due"], DATE_FORMAT)
+        except ValueError:
             return datetime.max
-    tasks = sorted(tasks, key=parse_due)
+    tasks_for_display = sorted(user_tasks, key=parse_due)
+    
     if q:
-        tasks = [t for t in tasks if q in t["title"].lower() or q in t.get("category", "").lower() or q in t.get("note", "").lower()]
-    return render_template_string(HTML, tasks=tasks, q=q, edit_task=edit_task, session=session)
+        tasks_for_display = [
+            t for t in tasks_for_display
+            if q in t["title"].lower() or
+               q in t.get("category", "").lower() or
+               q in t.get("note", "").lower()
+        ]
+
+    return render_template_string(MAIN_HTML, tasks=tasks_for_display, q=q, edit_task=edit_task, session=session)
 
 @app.route("/mark_done/<int:task_id>", methods=["POST"])
 @login_required
 def mark_done_route(task_id):
     username = session['username']
     mark_done(task_id, username)
+    flash("Task marked as done!", 'success')
     return redirect(url_for("index"))
 
 @app.route("/delete/<int:task_id>", methods=["POST"])
@@ -438,6 +536,7 @@ def mark_done_route(task_id):
 def delete(task_id):
     username = session['username']
     delete_task(task_id, username)
+    flash("Task deleted successfully!", 'success')
     return redirect(url_for("index"))
 
 @app.route("/archive/<int:task_id>", methods=["POST"])
@@ -445,6 +544,7 @@ def delete(task_id):
 def archive(task_id):
     username = session['username']
     archive_task(task_id, username)
+    flash("Task archived!", 'success')
     return redirect(url_for("index"))
 
 @app.route("/unarchive/<int:task_id>", methods=["POST"])
@@ -452,52 +552,60 @@ def archive(task_id):
 def unarchive(task_id):
     username = session['username']
     unarchive_task(task_id, username)
+    flash("Task unarchived!", 'success')
     return redirect(url_for("index"))
 
 
 # --- Authentication Routes ---
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    error = None
-    success = None
+    if 'username' in session:
+        return redirect(url_for('index')) # Already logged in
+        
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         user = find_user(username)
         if user and user["password"] == hash_password(password):
             session['username'] = username
+            flash(f"Welcome back, {username}!", 'success')
             return redirect(url_for('index'))
         else:
-            error = "Invalid username or password."
-    if 'registered' in request.args:
-        success = "Registration successful! Please log in."
-    return render_template_string(LOGIN_HTML, error=error, success=success)
+            flash("Invalid username or password.", 'error')
+    
+    return render_template_string(LOGIN_HTML)
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    error = None
-    success = None
+    if 'username' in session:
+        return redirect(url_for('index')) # Already logged in
+
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
+        
         if not username or not password:
-            error = "Username and password are required."
+            flash("Username and password are required.", 'error')
         elif find_user(username):
-            error = "Username already exists."
+            flash("Username already exists. Please choose a different one.", 'error')
         elif password != confirm:
-            error = "Passwords do not match."
+            flash("Passwords do not match.", 'error')
         else:
             users = load_users()
             users.append({"username": username, "password": hash_password(password)})
             save_users(users)
-            return redirect(url_for('login', registered=1))
-    return render_template_string(REGISTER_HTML, error=error, success=success)
+            flash("Registration successful! Please log in.", 'success')
+            return redirect(url_for('login'))
+            
+    return render_template_string(REGISTER_HTML)
 
 @app.route("/logout")
+@login_required # Ensure only logged-in users can logout
 def logout():
     session.pop('username', None)
+    flash("You have been logged out.", 'success')
     return redirect(url_for('login'))
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(debug=True)
