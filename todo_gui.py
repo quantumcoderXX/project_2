@@ -118,6 +118,17 @@ class TodoApp:
         self.update_btn = ttk.Button(entry_frame, text="Update Task", command=self.update_task, state="disabled")
         self.update_btn.grid(row=3, column=2, pady=4)
 
+        # Filter frame (New Feature)
+        filter_frame = ttk.LabelFrame(self.root, text="Filter Tasks")
+        filter_frame.pack(fill="x", padx=10, pady=5)
+
+        ttk.Label(filter_frame, text="Filter by Category:").pack(side="left", padx=5)
+        self.filter_category_var = tk.StringVar(value="All Categories")
+        self.category_filter_combobox = ttk.Combobox(filter_frame, textvariable=self.filter_category_var, width=20, state="readonly")
+        self.category_filter_combobox.pack(side="left", padx=5)
+        self.category_filter_combobox.bind("<<ComboboxSelected>>", self.refresh_tasks)
+        self.populate_category_filter() # Populate categories on startup
+
         # Task list
         self.tree = ttk.Treeview(self.root, columns=("id", "title", "due", "priority", "category", "done", "archived"), show="headings")
         for col in ("id", "title", "due", "priority", "category", "done", "archived"):
@@ -135,6 +146,11 @@ class TodoApp:
         ttk.Button(btn_frame, text="Unarchive", command=self.unarchive_task).pack(side="left")
         ttk.Button(btn_frame, text="Refresh", command=self.refresh_tasks).pack(side="right")
 
+    def populate_category_filter(self):
+        tasks = load_tasks()
+        categories = sorted(list(set(task["category"] for task in tasks if "category" in task)))
+        self.category_filter_combobox["values"] = ["All Categories"] + categories
+
     def add_task(self):
         title = self.title_var.get().strip()
         due = self.due_var.get().strip() or "No due date"
@@ -146,6 +162,7 @@ class TodoApp:
             return
         add_task(title, due, priority, category, note)
         self.clear_entry()
+        self.populate_category_filter() # Update categories after adding a new task
         self.refresh_tasks()
 
     def update_task(self):
@@ -158,6 +175,7 @@ class TodoApp:
         note = self.note_var.get().strip()
         update_task(self.selected_id, title, due, priority, category, note)
         self.clear_entry()
+        self.populate_category_filter() # Update categories after updating a task
         self.refresh_tasks()
         self.add_btn["state"] = "normal"
         self.update_btn["state"] = "disabled"
@@ -177,6 +195,7 @@ class TodoApp:
         task_id = int(self.tree.item(sel[0])["values"][0])
         if messagebox.askyesno("Delete", "Delete this task?"):
             delete_task(task_id)
+            self.populate_category_filter() # Update categories after deleting a task
             self.refresh_tasks()
 
     def archive_task(self):
@@ -195,10 +214,20 @@ class TodoApp:
         unarchive_task(task_id)
         self.refresh_tasks()
 
-    def refresh_tasks(self):
+    def refresh_tasks(self, event=None): # event=None for direct calls
         for row in self.tree.get_children():
             self.tree.delete(row)
-        for task in load_tasks():
+        
+        selected_category = self.filter_category_var.get()
+        all_tasks = load_tasks()
+        
+        filtered_tasks = []
+        if selected_category == "All Categories":
+            filtered_tasks = all_tasks
+        else:
+            filtered_tasks = [task for task in all_tasks if task.get("category") == selected_category]
+
+        for task in filtered_tasks:
             self.tree.insert("", "end", values=(task["id"], task["title"], task["due"], task["priority"], task["category"], "Yes" if task["done"] else "No", "Yes" if task.get("archived", False) else "No"))
 
     def on_tree_select(self, event):
