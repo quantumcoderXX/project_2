@@ -83,7 +83,7 @@ def unarchive_task(task_id):
 
 # --- GUI ---
 class TodoApp:
-    def __init__(self, root):
+    def _init_(self, root):
         self.root = root
         self.root.title("To-Do List GUI")
         self.create_widgets()
@@ -244,7 +244,7 @@ class TodoApp:
         if hasattr(self, "selected_id"):
             del self.selected_id
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     root = tk.Tk()
     app = TodoApp(root)
     root.mainloop()
