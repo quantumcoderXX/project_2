@@ -1,13 +1,14 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 import json
 import os
+import csv
 
 TASKS_FILE = "tasks.json"
 DATE_FORMAT = "%Y-%m-%d"
 
-# --- Data Logic (reuse from CLI) ---
+# --- Data Logic ---
 def load_tasks():
     if not os.path.exists(TASKS_FILE):
         return []
@@ -89,11 +90,20 @@ class TodoApp:
         self.refresh_tasks()
 
     def create_widgets(self):
+        # Search bar
+        search_frame = ttk.Frame(self.root)
+        search_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Label(search_frame, text="Search:").pack(side="left")
+        self.search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
+        search_entry.pack(side="left", padx=5)
+        search_entry.bind("<KeyRelease>", lambda e: self.refresh_tasks())
+
         # Entry frame
         entry_frame = ttk.LabelFrame(self.root, text="Add/Edit Task")
         entry_frame.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(entry_frame, text="Title:").grid(row=0, column=0, sticky="e")
+        ttk.Label(entry_frame, text="Title: ").grid(row=0, column=0, sticky="e")
         self.title_var = tk.StringVar()
         ttk.Entry(entry_frame, textvariable=self.title_var, width=30).grid(row=0, column=1, padx=2)
 
@@ -101,15 +111,15 @@ class TodoApp:
         self.due_var = tk.StringVar()
         ttk.Entry(entry_frame, textvariable=self.due_var, width=15).grid(row=0, column=3, padx=2)
 
-        ttk.Label(entry_frame, text="Priority:").grid(row=1, column=0, sticky="e")
+        ttk.Label(entry_frame, text="Priority: ").grid(row=1, column=0, sticky="e")
         self.priority_var = tk.StringVar(value="medium")
         ttk.Combobox(entry_frame, textvariable=self.priority_var, values=["low", "medium", "high"], width=12).grid(row=1, column=1, padx=2)
 
-        ttk.Label(entry_frame, text="Category:").grid(row=1, column=2, sticky="e")
+        ttk.Label(entry_frame, text="Category: ").grid(row=1, column=2, sticky="e")
         self.category_var = tk.StringVar(value="General")
         ttk.Entry(entry_frame, textvariable=self.category_var, width=15).grid(row=1, column=3, padx=2)
 
-        ttk.Label(entry_frame, text="Note:").grid(row=2, column=0, sticky="e")
+        ttk.Label(entry_frame, text="Note: ").grid(row=2, column=0, sticky="e")
         self.note_var = tk.StringVar()
         ttk.Entry(entry_frame, textvariable=self.note_var, width=50).grid(row=2, column=1, columnspan=3, padx=2, pady=2, sticky="ew")
 
@@ -118,15 +128,13 @@ class TodoApp:
         self.update_btn = ttk.Button(entry_frame, text="Update Task", command=self.update_task, state="disabled")
         self.update_btn.grid(row=3, column=2, pady=4)
 
-        # Task list
         self.tree = ttk.Treeview(self.root, columns=("id", "title", "due", "priority", "category", "done", "archived"), show="headings")
         for col in ("id", "title", "due", "priority", "category", "done", "archived"):
             self.tree.heading(col, text=col.capitalize())
-            self.tree.column(col, width=80 if col=="title" else 60)
+            self.tree.column(col, width=100)
         self.tree.pack(fill="both", expand=True, padx=10, pady=5)
         self.tree.bind("<Double-1>", self.on_tree_select)
 
-        # Action buttons
         btn_frame = ttk.Frame(self.root)
         btn_frame.pack(fill="x", padx=10, pady=5)
         ttk.Button(btn_frame, text="Mark Done", command=self.mark_done).pack(side="left")
@@ -196,9 +204,16 @@ class TodoApp:
         self.refresh_tasks()
 
     def refresh_tasks(self):
+        search_term = self.search_var.get().strip().lower() if hasattr(self, "search_var") else ""
         for row in self.tree.get_children():
             self.tree.delete(row)
         for task in load_tasks():
+            if search_term and not (
+                search_term in task["title"].lower() or
+                search_term in task.get("category", "").lower() or
+                search_term in task.get("note", "").lower()
+            ):
+                continue
             self.tree.insert("", "end", values=(task["id"], task["title"], task["due"], task["priority"], task["category"], "Yes" if task["done"] else "No", "Yes" if task.get("archived", False) else "No"))
 
     def on_tree_select(self, event):
@@ -212,7 +227,6 @@ class TodoApp:
         self.due_var.set(vals[2])
         self.priority_var.set(vals[3])
         self.category_var.set(vals[4])
-        # Note is not shown in the table, so fetch from data
         for task in load_tasks():
             if task["id"] == self.selected_id:
                 self.note_var.set(task.get("note", ""))
