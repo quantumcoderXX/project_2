@@ -90,8 +90,31 @@ class TodoApp:
     def __init__(self, root):
         self.root = root
         self.root.title("To-Do List GUI")
+        self.create_menu() # Call to create the menu
         self.create_widgets()
         self.refresh_tasks()
+
+    def create_menu(self):
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self.show_about_info)
+
+    def show_about_info(self):
+        """Displays information about the application and its contributors."""
+        about_text = (
+            "To-Do List GUI Application\n"
+            "Version: 1.0\n"
+            "Developed by: Your Name/Organization\n\n"
+            "Special thanks to:\n"
+            "- [Contributor Name 1] for [specific contribution, e.g., UI design tips]\n"
+            "- [Contributor Name 2] for [specific contribution, e.g., testing assistance]\n\n"
+            "This application helps you manage your daily tasks efficiently."
+        )
+        messagebox.showinfo("About To-Do List", about_text)
+
 
     def create_widgets(self):
         entry_frame = ttk.LabelFrame(self.root, text="Add/Edit Task")
